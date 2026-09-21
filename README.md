@@ -1,3 +1,8 @@
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.141-009688?logo=fastapi&logoColor=white)
+![Tests](https://github.com/Ckk983/my-ai-assistant/actions/workflows/ci.yml/badge.svg)
+![License](https://img.shields.io/badge/License-MIT-yellow.svg)
+
 # 我的 AI 助手（my-ai-assistant）
 
 一个边做边学用的最小可运行 AI 应用：**对话 + 多轮记忆 + 本地存储**。
