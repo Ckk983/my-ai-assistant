@@ -14,6 +14,9 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
+# .env 里还是这个值，说明用户还没换成自己真实的 Key
+PLACEHOLDER_KEY = "在这里粘贴你的key"
+
 
 class Settings:
     # ---- 大模型相关（从 .env 读）----
@@ -24,6 +27,17 @@ class Settings:
     # ---- 目录（本地文件存储）----
     DATA_DIR: Path = BASE_DIR / "data"
     LOG_DIR: Path = BASE_DIR / "logs"
+
+    @property
+    def llm_ready(self) -> bool:
+        """密钥是否真的配好了。
+
+        注意：这里要同时判"空值"和"还是占位符"两种情况。
+        （踩过的坑：只判空值的话，占位符会被当成有效Key，
+          程序会带着假Key去调API，用户看到的是难懂的 Internal Server Error。）
+        """
+        key = self.LLM_API_KEY.strip()
+        return bool(key) and key != PLACEHOLDER_KEY
 
 
 settings = Settings()

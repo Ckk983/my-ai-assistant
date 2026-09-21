@@ -27,26 +27,43 @@ from app.services import llm, storage
 app = FastAPI(
     title="我的 AI 助手",
     description="一个边做边学用的最小可运行项目：对话 + 多轮记忆 + 本地存储",
-    version="0.1.0",
+    version="0.1.1",
 )
 
 
 @app.get("/")
 def health():
     """健康检查：确认服务活着。部署到服务器后，第一件事就是访问这个接口。"""
-    return {"status": "ok", "model": settings.LLM_MODEL}
+    return {
+        "status": "ok",
+        "model": settings.LLM_MODEL,
+        "llm_ready": settings.llm_ready,  # 一眼看出密钥配好了没
+    }
 
 
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
     """核心接口：问一句，答一句。"""
-    # 配置没配好时给出明确提示，而不是抛一堆看不懂的异常
-    if not settings.LLM_API_KEY:
+    # ① 配置检查：给出明确提示，而不是抛一堆看不懂的异常
+    if not settings.llm_ready:
         raise HTTPException(
             status_code=500,
-            detail="还没有配置密钥。请打开项目根目录的 .env 文件，把 LLM_API_KEY 填上。",
+            detail=(
+                "还没有配置密钥。请打开项目根目录的 .env 文件，"
+                "把 LLM_API_KEY 换成你在模型平台申请到的真实 Key。"
+            ),
         )
-    answer, used_tokens = llm.ask(req.question, req.session_id)
+
+    # ② 调用外部服务要包异常：网络抖动、Key 失效、余额不足都可能发生。
+    #    把技术异常翻译成人话，方便自己排查，也避免把调用栈暴露给用户。
+    try:
+        answer, used_tokens = llm.ask(req.question, req.session_id)
+    except Exception as exc:  # noqa: BLE001 - 这里就是要兜住所有外部异常
+        raise HTTPException(
+            status_code=502,
+            detail=f"调用大模型失败（{type(exc).__name__}）：{exc}",
+        ) from exc
+
     return ChatResponse(answer=answer, session_id=req.session_id, used_tokens=used_tokens)
 
 
