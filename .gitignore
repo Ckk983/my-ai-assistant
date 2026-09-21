@@ -1,0 +1,24 @@
+# ===== 密钥：绝对不上传 =====
+.env
+
+# ===== Python 运行时产生的缓存 =====
+__pycache__/
+*.py[cod]
+
+# ===== 虚拟环境 =====
+venv/
+.venv/
+
+# ===== 日志 =====
+logs/*.log
+
+# ===== 项目自己产生的数据（不是源代码）=====
+data/history.json
+data/*.pdf
+data/*.docx
+
+# ===== 编辑器 / 系统 =====
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
