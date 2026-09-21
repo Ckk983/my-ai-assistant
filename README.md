@@ -134,3 +134,5 @@ Python · FastAPI · Pydantic · python-dotenv · openai SDK（兼容 DeepSeek �
 **4. 密钥为什么放 .env 而不是写在代码里？**
 代码要上传 GitHub，密钥写进代码等于公开。`.env` 已在 `.gitignore` 里排除，
 只上传 `.env.example` 模板（写变量名、不写值）。
+
+我的第一个 AI 项目，2026-09-21
