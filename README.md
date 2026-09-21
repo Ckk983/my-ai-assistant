@@ -59,8 +59,8 @@ LLM_API_KEY=你的key
 **第 2 步：装依赖**
 ```bash
 python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
+# 不用 activate，直接指定解释器（避免 PowerShell 脚本执行策略报错）
+.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
 **第 3 步：启动**
@@ -73,6 +73,14 @@ uvicorn app.main:app --reload --port 8000
 ```
 再发一次 `{"session_id": "test-1", "question": "我叫什么名字？"}` ——
 如果它答出"小明"，说明**多轮记忆（历史上下文）跑通了**。
+
+## 一键测试（不用看英文文档，直接跑）
+
+先启动服务，然后另开一个终端执行：
+```bash
+.venv\Scripts\python.exe scripts\try_chat.py
+```
+它会自动做两轮对话：先告诉 AI 名字，再问它名字 —— 答对了就说明多轮记忆跑通了。
 
 ## 接口清单
 
@@ -100,6 +108,7 @@ Python · FastAPI · Pydantic · python-dotenv · openai SDK（兼容 DeepSeek �
 - [x] 本地文件持久化 + 按会话隔离
 - [x] 参数校验 + 明确的错误提示
 - [x] 基础单元测试
+- [x] 一键测试脚本（scripts/try_chat.py）
 - [ ] 第二版：存储换成 MySQL（只改 services/storage.py）
 - [ ] 第二版：加 Redis 缓存会话上下文
 - [ ] 第三版：RAG 检索（文档切块 → Embedding → 向量库 → 拼进提示词）
