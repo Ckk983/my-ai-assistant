@@ -1,50 +1,48 @@
 """入口层：程序从这里开始运行。
 
-数据流（从上到下就是一次请求的完整旅程）：
+数据流（一次带知识库的提问）：
 
-    网页  ──HTTP请求(JSON)──►  main.py
-                                │ ① 校验参数（schemas.py 负责）
-                                │ ② 交给 services/llm.py 处理
-                                │       └─► storage.py 读历史
-                                │       └─► 调大模型 API
-                                │       └─► storage.py 写回记录
-                                │ ③ 返回 HTTP响应(JSON)
-    网页  ◄────────────────────┘
+    网页 ──HTTP请求(JSON)──► main.py
+                              │ ① 校验参数（models/schemas.py）
+                              │ ② 业务处理（services/llm.py）
+                              │      ├─► retriever.py 检索资料 ← RAG 新增
+                              │      ├─► storage.py 读最近 6 轮历史
+                              │      ├─► 调用大模型 API（资料 + 历史 + 问题）
+                              │      └─► storage.py 写回这轮问答
+                              │ ③ 返回 HTTP响应(JSON)
+    网页 ◄────────────────────┘
 
-职责划分（面试会问"你的代码怎么分层"）：
-    main.py         只管"接收请求、返回结果"，不写业务逻辑
-    services/       业务逻辑：调模型、存取数据
-    models/         数据结构定义
-    config.py       读配置
-这样换数据库或换模型时，只改一个文件，其他都不用动。
+额外提供了两个"观察检索过程"的接口（/knowledge、/search），
+用来理解 RAG 到底检索到了什么，面试演示时很好用。
 """
 from fastapi import FastAPI, HTTPException
 
 from app.config import settings
-from app.models.schemas import ChatRequest, ChatResponse, MessageOut
-from app.services import llm, storage
+from app.models.schemas import ChatRequest, ChatResponse, MessageOut, SearchHit
+from app.services import llm, retriever, storage
 
 app = FastAPI(
     title="我的 AI 助手",
-    description="一个边做边学用的最小可运行项目：对话 + 多轮记忆 + 本地存储",
-    version="0.1.1",
+    description="边做边学用的 AI 应用：对话 + 多轮记忆 + 本地存储 + RAG 知识库检索",
+    version="0.2.0",
 )
 
 
 @app.get("/")
 def health():
-    """健康检查：确认服务活着。部署到服务器后，第一件事就是访问这个接口。"""
+    """健康检查：确认服务活着、密钥配好没、知识库加载了没。"""
+    chunks = retriever.load_chunks()
     return {
         "status": "ok",
         "model": settings.LLM_MODEL,
-        "llm_ready": settings.llm_ready,  # 一眼看出密钥配好了没
+        "llm_ready": settings.llm_ready,
+        "knowledge_chunks": len(chunks),
     }
 
 
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
-    """核心接口：问一句，答一句。"""
-    # ① 配置检查：给出明确提示，而不是抛一堆看不懂的异常
+    """核心接口：问一句，答一句。use_rag=true 时先检索知识库。"""
     if not settings.llm_ready:
         raise HTTPException(
             status_code=500,
@@ -54,17 +52,20 @@ def chat(req: ChatRequest):
             ),
         )
 
-    # ② 调用外部服务要包异常：网络抖动、Key 失效、余额不足都可能发生。
-    #    把技术异常翻译成人话，方便自己排查，也避免把调用栈暴露给用户。
     try:
-        answer, used_tokens = llm.ask(req.question, req.session_id)
+        answer, used_tokens, sources = llm.ask(req.question, req.session_id, use_rag=req.use_rag)
     except Exception as exc:  # noqa: BLE001 - 这里就是要兜住所有外部异常
         raise HTTPException(
             status_code=502,
             detail=f"调用大模型失败（{type(exc).__name__}）：{exc}",
         ) from exc
 
-    return ChatResponse(answer=answer, session_id=req.session_id, used_tokens=used_tokens)
+    return ChatResponse(
+        answer=answer,
+        session_id=req.session_id,
+        used_tokens=used_tokens,
+        sources=sources,
+    )
 
 
 @app.get("/history/{session_id}", response_model=list[MessageOut])
@@ -77,3 +78,34 @@ def get_history(session_id: str, limit: int = 50):
 def sessions():
     """列出所有会话ID。"""
     return storage.list_sessions()
+
+
+# ---------------- 下面是"观察 RAG"用的辅助接口 ----------------
+
+@app.get("/knowledge")
+def knowledge_info():
+    """看看知识库里有哪些文件、一共切成了多少块。"""
+    chunks = retriever.load_chunks()
+    files = sorted({c["source"] for c in chunks})
+    return {"files": files, "file_count": len(files), "chunk_count": len(chunks)}
+
+
+@app.post("/knowledge/reload")
+def knowledge_reload():
+    """改了 data/knowledge 里的文档后，调用它重建索引。"""
+    return {"chunk_count": retriever.reload_index()}
+
+
+@app.get("/search", response_model=list[SearchHit])
+def search_knowledge(q: str, top_k: int = 3):
+    """只做检索、不调模型 —— 用来单独观察"检索"这一步干了什么。"""
+    hits = retriever.search(q, top_k)
+    return [
+        SearchHit(
+            source=h["source"],
+            chunk_id=h["chunk_id"],
+            score=h["score"],
+            preview=h["text"][:80].replace("\n", " ") + ("…" if len(h["text"]) > 80 else ""),
+        )
+        for h in hits
+    ]

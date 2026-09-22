@@ -5,8 +5,8 @@
 
 # 我的 AI 助手（my-ai-assistant）
 
-一个边做边学用的最小可运行 AI 应用：**对话 + 多轮记忆 + 本地存储**。
-后续会逐步升级为完整的 RAG 知识库问答系统。
+一个边做边学用的 AI 应用：**对话 + 多轮记忆 + 本地存储 + RAG 知识库检索**。
+回答不了的问题，可以让它「先查你自己的资料再答」（RAG），并返回引用了哪些文件。
 
 ## 这个项目是干什么的
 
@@ -37,8 +37,9 @@
 网页 ──HTTP请求(JSON)──► main.py
                           │ ① 校验参数（models/schemas.py）
                           │ ② 业务处理（services/llm.py）
+                          │      ├─► retriever.py 检索知识库  ★RAG
                           │      ├─► storage.py 读最近 6 轮历史
-                          │      ├─► 调用大模型 API（外部 HTTP）
+                          │      ├─► 调用大模型 API（资料 + 历史 + 问题）
                           │      └─► storage.py 写回这轮问答
                           │ ③ 返回 HTTP响应(JSON)
 网页 ◄───────────────────┘
@@ -46,6 +47,7 @@
 数据存在哪：
   .env                 → 密钥（本地文件，不上传）
   data/history.json    → 聊天记录（本地文件，第一版方案）
+  data/knowledge/      → 知识库文档（.md/.txt，被检索的资料）
   logs/                → 程序日志
   内存                  → 正在处理的这条请求
 ```
@@ -59,10 +61,13 @@ my-ai-assistant/
 │   ├── config.py          # 读配置（从 .env）
 │   ├── models/schemas.py  # 数据结构定义（进出的数据长什么样）
 │   ├── services/
-│   │   ├── llm.py         # 调大模型
+│   │   ├── llm.py         # 调大模型（含 RAG 提示词拼装）
+│   │   ├── retriever.py   # ★ 检索层：切块 / 打分 / 召回（RAG 的 R）
 │   │   └── storage.py     # ★ 存储层：数据存在哪、怎么存
 │   └── db/session.py      # 数据库连接（第二版的占位）
-├── data/                  # 知识库原始文件 + 聊天记录
+├── data/
+│   ├── knowledge/         # 知识库文档（检索的数据源）
+│   └── history.json       # 聊天记录
 ├── logs/                  # 日志
 ├── tests/                 # 测试
 ├── .env                   # 密钥（★不上传★）
@@ -114,6 +119,9 @@ uvicorn app.main:app --reload --port 8000
 | POST | `/chat` | 提问并获取回答 |
 | GET | `/history/{session_id}` | 查某个会话的历史 |
 | GET | `/sessions` | 列出所有会话 |
+| GET | `/knowledge` | 看知识库有哪些文件、切了多少块 |
+| POST | `/knowledge/reload` | 改了知识库文档后重建索引 |
+| GET | `/search?q=xxx` | **只做检索、不调模型**，用来观察 RAG 检索到了什么 |
 
 ## 跑测试
 
@@ -135,7 +143,8 @@ Python · FastAPI · Pydantic · python-dotenv · openai SDK（兼容 DeepSeek �
 - [x] 一键测试脚本（scripts/try_chat.py）
 - [ ] 第二版：存储换成 MySQL（只改 services/storage.py）
 - [ ] 第二版：加 Redis 缓存会话上下文
-- [ ] 第三版：RAG 检索（文档切块 → Embedding → 向量库 → 拼进提示词）
+- [x] 第三版①：RAG 检索（文档切块 → 关键词检索 → 拼进提示词 → 返回引用来源）
+- [ ] 第三版②：把检索器换成**向量检索**（Embedding + 向量库），并对比两者召回率
 - [ ] 第三版：Rerank 重排 + 引用溯源
 - [ ] 第四版：Docker 容器化 + 部署到云服务器
 - [ ] 第四版：压测出 QPS / P99 / Token 成本数据
@@ -158,5 +167,20 @@ Python · FastAPI · Pydantic · python-dotenv · openai SDK（兼容 DeepSeek �
 **4. 密钥为什么放 .env 而不是写在代码里？**
 代码要上传 GitHub，密钥写进代码等于公开。`.env` 已在 `.gitignore` 里排除，
 只上传 `.env.example` 模板（写变量名、不写值）。
+
+**5. 为什么第一版 RAG 用关键词检索，而不是向量检索？**
+因为要先跑通「检索 → 增强 → 生成」这条数据流。关键词检索零新增依赖、零额外 API Key，
+当天就能验证整条链路。检索器和存储层一样是可替换的零件 —— 换成向量检索时只改
+`retriever.py` 一个文件，还能用同一组问题对比两者的召回率，这比直接说"我用了向量库"
+更有说服力。
+
+**6. 切块为什么要留重叠（overlap）？**
+如果按固定长度硬切，一句关键的话可能刚好被切成两半，两个块都不完整，检索时就漏掉了。
+留 50 字重叠能保证边界上的语义至少完整地出现在其中一块里。
+
+**7. RAG 的代价是什么？**
+首答的 Token 消耗从 93 涨到 693（约 7 倍）—— 因为要把检索到的资料一起塞进上下文。
+所以 RAG 是「准确性换成本」的取舍：资料块数和 top_k 都不能无限加大。
+不启用 RAG 时，模型会诚实地说"我无法确认"，而不是编造 —— 这也是提示词里明确要求的。
 
 我的第一个 AI 项目，2026-09-21
